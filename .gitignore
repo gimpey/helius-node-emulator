@@ -1,0 +1,10 @@
+# environment variables
+.env
+.env.development
+
+# build files
+target
+
+# testing files
+deprecated
+tx-files

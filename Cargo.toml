@@ -1,0 +1,35 @@
+[package]
+name = "helius-node-emulator"
+version = "0.0.1"
+edition = "2021"
+description = "Solana node emulator using Helius websockets."
+authors = ["gimpey <gimpey@gimpey.com"]
+repository = "https://github.com/gimpey/helius-node-emulator"
+license = "Apache-2.0"
+keywords = ["grpc", "postgresql"]
+rust-version = "1.82.0"
+
+[dependencies]
+bs58 = "0.5.1"
+borsh = "0.9.0"
+chrono = "0.4"
+tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread", "net"] }
+tokio-stream = "0.1.15"
+tokio-tungstenite = { version = "0.24.0", features = ["native-tls", "handshake"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "time"] }
+dotenv = "0.15"
+serde_json = "1.0"
+uuid = { version = "1.3", features = ["v4"] }
+futures = "0.3.30"
+futures-util = "0.3.30"
+reqwest = { version = "0.12.8", features = ["json"], default-features = false }
+zmq = "0.10"
+solana-transaction-status = "2.1"
+serde = "1.0"
+yansi = "0.5"
+
+[features]
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls-tls"]
