@@ -1,4 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use solana_transaction_status::{option_serializer::OptionSerializer, parse_accounts::ParsedAccount, UiPartiallyDecodedInstruction, UiTransactionStatusMeta};
 use tokio::sync::mpsc::UnboundedSender;
@@ -7,6 +8,12 @@ use chrono::Utc;
 use yansi::Paint;
 
 use crate::{helpers::find_token_balance_by_address::find_token_balance_by_address, messaging::MpscMessage};
+
+pub mod spl_token_creation {
+    tonic::include_proto!("spl_token_creation");
+}
+
+use spl_token_creation::SplTokenCreationNotification;
 
 #[derive(Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct CreateDataSchema {
@@ -21,22 +28,6 @@ struct BaseMetadata {
     name: String,
     symbol: String,
     uri: String,
-}
-
-#[derive(Debug, Serialize)]
-struct Tmp {
-    deployer: String,
-    token_address: String,
-    bonding_curve: String,
-    associated_bonding_curve: String,
-    token_name: String,
-    token_symbol: String,
-    token_ipfs_hash: String,
-    creator_buy_percentage: f64,
-    timestamp: i64,
-    tx_hash: String,
-    source: String,
-    platform: String,
 }
 
 pub fn creation_handler(
@@ -85,14 +76,14 @@ pub fn creation_handler(
 
     let creator_percentage: f64 = owner_balance / 1e9;
 
-    let message = Tmp {
+    let message = SplTokenCreationNotification {
         deployer: deployer.to_string(),
         token_address: token_account.to_string(),
         bonding_curve: bonding_curve.to_string(),
         associated_bonding_curve: associated_bonding_curve.to_string(),
         token_name: metadata.name,
         token_symbol: metadata.symbol,
-        token_ipfs_hash: metadata.uri,
+        token_uri: metadata.uri,
         creator_buy_percentage: creator_percentage,
         timestamp: Utc::now().timestamp_millis(),
         tx_hash: signature.to_string(),
@@ -102,12 +93,13 @@ pub fn creation_handler(
 
     tx.send(MpscMessage {
         topic: "pump_fun_creation".to_string(),
-        payload: serde_json::to_vec(&message).expect("Failed to serialize message.")
+        payload: message.encode_to_vec(),
     }).expect("Failed to send MPSC Message.");
 
     info!(
         "Processing {} instruction for {} {}", 
         Paint::magenta("CREATION"), 
         Paint::cyan("PUMP_FUN_PROGRAM"), 
-        Paint::black(token_account));
+        Paint::black(token_account)
+    );
 }

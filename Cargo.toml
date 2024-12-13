@@ -29,6 +29,14 @@ solana-transaction-status = "2.1"
 serde = "1.0"
 yansi = "0.5"
 
+# there seem to be issues with the prost crate versioning
+# https://github.com/hyperium/tonic/issues/765
+prost = "0.13"
+tonic = "0.12"
+
+[build-dependencies]
+tonic-build = "0.12"
+
 [features]
 default = ["native-tls"]
 native-tls = ["reqwest/native-tls"]

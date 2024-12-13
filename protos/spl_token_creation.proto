@@ -1,0 +1,28 @@
+syntax = "proto3";
+package spl_token_creation;
+
+option go_package = "spl_token_creationpb";
+
+enum Source {
+    HELIUS = 0;
+    NODE = 1;
+}
+
+enum Platform {
+    PUMP_FUN = 0;
+}
+
+message SplTokenCreationNotification {
+    string deployer = 1;
+    string token_address = 2;
+    string bonding_curve = 3;
+    string associated_bonding_curve = 4;
+    string token_name = 5;
+    string token_symbol = 6;
+    string token_uri = 7;
+    double creator_buy_percentage = 8;
+    int64 timestamp = 9;
+    string tx_hash = 10;
+    string source = 11;
+    string platform = 12;
+}
