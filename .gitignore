@@ -8,3 +8,8 @@ target
 # testing files
 deprecated
 tx-files
+
+# javascript dependencies
+node_modules
+js-package/protos
+js-package/dist

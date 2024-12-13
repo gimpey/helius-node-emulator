@@ -1,0 +1,29 @@
+{
+  "name": "@gimpey-com/helius-node-emulator",
+  "version": "0.0.0",
+  "description": "Helius Node Emulator proto package.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gimpey-com/helius-node-emulator.git#main"
+  },
+  "author": "gimpey <gimpey@gimpey.com> (gimpey.com)",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc",
+    "build:protos": "protoc --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=outputServices=grpc-js,esModuleInterop=true,env=node --proto_path=../protos ../protos/*.proto",
+    "clean": "rm -rf dist",
+    "bump-version": "node scripts/bump-version.js",
+    "publish-package": "npm publish --access restricted"
+  },
+  "packageManager": "yarn@4.5.3",
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "ts-proto": "^2.2.5",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.12.2"
+  }
+}
