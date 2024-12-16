@@ -17,6 +17,8 @@ use crate::programs::ProgramId;
 
 #[derive(Clone)]
 pub struct TransactionProcessor {
+    api_key: String,
+    url: String,
     ws: Arc<Mutex<Option<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
     tx: UnboundedSender<MpscMessage>,
 }
@@ -50,21 +52,83 @@ pub struct SubscriptionSuccessfulNotification {
     result: u64
 }
 
+// todo: if we get the below we need to resubscribe
+// Unknown JSON message: 
+// {
+//     "jsonrpc":"2.0",
+//     "method":"transactionSubscribe",
+//     "params":{
+//         "subscription":879524311758297,
+//         "error":"Status { code: Internal, message: \"h2 protocol error: error reading a body from connection\", source: Some(hyper::Error(Body, Error { kind: Reset(StreamId(1), INTERNAL_ERROR, Remote) })) }"
+//     }
+// }
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SubscriptionErrorParams {
+    subscription: u64,
+    error: String
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct SubscriptionErrorNotification {
+    jsonrpc: String,
+    method: String,
+    params: SubscriptionErrorParams
+}
+
 impl TransactionProcessor {
     pub async fn new(api_key: &str, url: &str, tx: UnboundedSender<MpscMessage>) -> Result<Self, WsError> {
-        let ws_url = format!("wss://{}/?api-key={}", url, api_key);
-        info!("Connecting to: wss://{}/?api-key=*", url);
+        Ok(Self {
+            api_key: api_key.to_string(),
+            url: url.to_string(),
+            ws: Arc::new(Mutex::new(None)),
+            tx
+        })
+    }
+
+    pub async fn start_processor(&self) {
+        let mut retry_attempts = 0;
+
+        loop {
+            if retry_attempts > 0 {
+                let delay = std::time::Duration::from_secs(2u64.pow((retry_attempts - 1).min(5)));
+                warn!(
+                    "Reconnecting WebSocket after {} seconds... (attempt #{})",
+                    delay.as_secs(),
+                    retry_attempts
+                );
+                tokio::time::sleep(delay).await;
+            }
+
+            match self.start_connection().await {
+                Ok(_) => {
+                    info!("WebSocket connected successfully!");
+                    retry_attempts = 0;
+                    self.subscribe_and_process().await;
+                }
+                Err(err) => {
+                    warn!("Failed to connect WebSocket: {}. Retrying...", err);
+                    retry_attempts += 1;
+                }
+            }
+        }
+    }
+
+    pub async fn start_connection(&self) -> Result<(), WsError> {
+        let ws_url = format!("wss://{}/?api-key={}", self.url, self.api_key);
+        info!("Connecting to: wss://{}/?api-key=*", self.url);
 
         let (ws, _response) = connect_async(ws_url).await?;
         info!("WebSocket connection established!");
 
-        Ok(Self {
-            ws: Arc::new(Mutex::new(Some(ws))),
-            tx
-        })
+        *self.ws.lock().await = Some(ws);
+
+        Ok(())
     }
     
-    pub async fn start_processor(&self) {
+    pub async fn subscribe_and_process(&self) {
         self.subscribe_to_transactions().await;
 
         let mut ws_guard = self.ws.lock().await;
@@ -160,7 +224,18 @@ impl TransactionProcessor {
                     info!("Subscription successful: {:?}", notification);
                     return;
                 }
-    
+
+                if let Ok(notification) = serde_json::from_value::<SubscriptionErrorNotification>(json.clone()) {
+                    warn!("Subscription error: {:?}", notification);
+                    
+                    let tx_clone = self.clone();
+                    tokio::spawn(async move {
+                        tx_clone.subscribe_to_transactions().await;
+                    });
+
+                    return;
+                }
+
                 println!("Unknown JSON message: {}", text);
             }
             Message::Pong(_data) => info!("WebSocket server responded with Pong."),

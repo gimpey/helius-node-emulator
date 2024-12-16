@@ -92,7 +92,7 @@ pub fn creation_handler(
     };
 
     tx.send(MpscMessage {
-        topic: "pump_fun_creation".to_string(),
+        topic: "spl_token_creation".to_string(),
         payload: message.encode_to_vec(),
     }).expect("Failed to send MPSC Message.");
 
