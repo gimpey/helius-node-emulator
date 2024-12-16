@@ -288,9 +288,37 @@ impl TransactionProcessor {
             }
         }
 
+        // todo: need to implement something on a per `program_id` basis where if the instruction type is not known we write the instruction to a file
         for instruction in parsed_instructions.iter() {
             match instruction {
-                UiParsedInstruction::Parsed(_ui_instruction) => {},
+                UiParsedInstruction::Parsed(_ui_instruction) => {
+                    // use std::fs::{self, File};
+                    // use std::path::Path;
+                    // use std::io::Write;
+
+                    // let program_address = &ui_instruction.program_id;
+
+                    // if let Value::Object(parsed) = &ui_instruction.parsed {
+                    //     let instruction_type = parsed
+                    //         .get("type")
+                    //         .and_then(|t| t.as_str())
+                    //         .expect("Parsed instruction does not contain a `type` field or it is not a string!");
+        
+                    //     let json = serde_json::to_string_pretty(&ui_instruction).expect("Failed to serialize notification");
+        
+                    //     let dir_path = format!("./unknown-txs/{}", program_address);
+                    //     fs::create_dir_all(&dir_path).expect("Failed to create directories");
+        
+                    //     let file_path = format!("{}/{}.json", dir_path, instruction_type);
+        
+                    //     if !Path::new(&file_path).exists() {
+                    //         let mut file = File::create(&file_path).expect("Failed to create file");
+                    //         file.write_all(json.as_bytes()).expect("Failed to write to file");
+                    //     }
+                    // } else {
+                    //     continue;
+                    // }
+                },
                 UiParsedInstruction::PartiallyDecoded(ui_instruction) => {
                     let program_address = &ui_instruction.program_id;
 
@@ -318,25 +346,7 @@ impl TransactionProcessor {
             };
         }
 
-        // todo: I think all of the transactions are parsed or partially decoded
-        // for instruction in compiled_instructions.iter() {
-        //     let program_id_index = instruction.program_id_index as usize;
-        //     let program_address = &accounts.get(program_id_index).unwrap().pubkey;
-
-        //     if let Some(program_id) = ProgramId::from_str(&program_address) {
-        //         match program_id {
-        //             ProgramId::PumpFun => {
-        //                 if let Some(instruction_type) = PumpFunFunction::from_data(&instruction.data) {
-        //                     match instruction_type {
-        //                         PumpFunFunction::Creation => pump_fun::creation::creation_handler(),
-        //                         PumpFunFunction::Buy => pump_fun::buy::buy_handler(),
-        //                         PumpFunFunction::Sell => pump_fun::sell::sell_handler(),
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        // todo: iterate through accounts and send an account update if the sol balance updates
 
         // todo: compile instructions
         // todo: compile inner instructions
@@ -345,8 +355,6 @@ impl TransactionProcessor {
         // todo: derive instruction discriminator
 
         // ! FOR DEBUGGING
-        // use std::io::Write;
-        // use std::fs::File;
         // let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
         // let mut file = File::create(format!("./tx-files/transaction-{}.json", &notification.params.result.signature)).expect("Failed to create file");
         // file.write_all(json.as_bytes()).expect("Failed to write to file");

@@ -28,13 +28,14 @@ async fn main() -> Result<(), WsError> {
 
     let (tx, mut rx) = mpsc::unbounded_channel::<messaging::MpscMessage>();
 
+    // todo: idk if it's in the api or here but sometimes this gets stuck? seems like it's the api, perhaps the metadata call?
+    // todo: okay seems like maybe it's here, like it falls behind or something
     tokio::spawn(async move {
         let context = zmq::Context::new();
         let publisher = context.socket(zmq::PUB).expect("Failed to create ZMQ socket.");
         publisher.bind("tcp://127.0.0.1:6900").expect("Failed to bind ZMQ socket.");
 
         while let Some(msg) = rx.recv().await {
-            // Format and send the message over ZMQ
             publisher.send(&msg.topic, zmq::SNDMORE).unwrap();
             publisher.send(&msg.payload, 0).unwrap(); 
         }

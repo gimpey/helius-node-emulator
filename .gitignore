@@ -7,7 +7,7 @@ target
 
 # testing files
 deprecated
-tx-files
+unknown-txs
 
 # javascript dependencies
 node_modules
