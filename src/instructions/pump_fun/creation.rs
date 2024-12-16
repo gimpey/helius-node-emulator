@@ -82,7 +82,7 @@ pub fn creation_handler(
         bonding_curve: bonding_curve.to_string(),
         associated_bonding_curve: associated_bonding_curve.to_string(),
         token_name: metadata.name,
-        token_symbol: metadata.symbol,
+        token_symbol: metadata.symbol.clone(),
         token_uri: metadata.uri,
         creator_buy_percentage: creator_percentage,
         timestamp: Utc::now().timestamp_millis(),
@@ -97,9 +97,10 @@ pub fn creation_handler(
     }).expect("Failed to send MPSC Message.");
 
     info!(
-        "Processing {} instruction for {} {}", 
+        "Processing {} instruction for {} {} {}", 
         Paint::magenta("CREATION"), 
         Paint::cyan("PUMP_FUN_PROGRAM"), 
-        Paint::black(token_account)
+        Paint::black(token_account),
+        Paint::black(metadata.symbol)
     );
 }
