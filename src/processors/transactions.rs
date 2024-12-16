@@ -347,12 +347,13 @@ impl TransactionProcessor {
         }
 
         // todo: iterate through accounts and send an account update if the sol balance updates
-
-        // todo: compile instructions
-        // todo: compile inner instructions
-        // todo: iterate through
-        // todo: derive program id
-        // todo: derive instruction discriminator
+        // Likely fastest way to do this:
+        // 1. Create a map between pre and post sol balances
+        // 2. If the balance changes, then we check if the address is a tracked address
+        //    Option A. first get the redis set of tracked addresses (think this is faster)
+        //    Option B. simply check if the address exists in the set 
+        // 3. If the address is tracked, then we send a balance update message
+        // 4. If the address is not tracked, then we continue
 
         // ! FOR DEBUGGING
         // let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
