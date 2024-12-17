@@ -329,6 +329,8 @@ impl TransactionProcessor {
 
                     if let Some(program_id) = ProgramId::from_str(&program_address) {
                         match program_id {
+                            // https://github.com/project-serum/serum-ts/blob/master/packages/serum/src/instructions.js#L33
+                            // https://github.com/project-serum/serum-ts/blob/master/packages/serum/src/instructions.js#L195
                             ProgramId::Serum => {
                                 if let Some(instruction_type) = SerumFunction::from_data(&ui_instruction.data) {
                                     match instruction_type {
