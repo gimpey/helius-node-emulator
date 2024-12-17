@@ -8,11 +8,16 @@ use tokio::sync::mpsc::UnboundedSender;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use tracing::{info, warn};
+use std::fs::{self, File};
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::instructions::pump_fun;
 use crate::messaging::MpscMessage;
 use crate::programs::pump_fun::PumpFunFunction;
+use crate::programs::raydium::RaydiumFunction;
+use crate::programs::serum::SerumFunction;
 use crate::programs::ProgramId;
 
 #[derive(Clone)]
@@ -324,6 +329,15 @@ impl TransactionProcessor {
 
                     if let Some(program_id) = ProgramId::from_str(&program_address) {
                         match program_id {
+                            ProgramId::Serum => {
+                                if let Some(instruction_type) = SerumFunction::from_data(&ui_instruction.data) {
+                                    match instruction_type {
+                                        SerumFunction::InitializeMarket => {
+                                            info!("Serum Initialize Market");
+                                        }
+                                    }
+                                }
+                            },
                             ProgramId::PumpFun => {
                                 if let Some(instruction_type) = PumpFunFunction::from_data(&ui_instruction.data) {
                                     match instruction_type {
@@ -337,6 +351,29 @@ impl TransactionProcessor {
                                         ),
                                         PumpFunFunction::Buy => pump_fun::buy::buy_handler(),
                                         PumpFunFunction::Sell => pump_fun::sell::sell_handler(),
+                                    }
+                                }
+                            },
+                            ProgramId::Raydium => {
+                                if let Some(instruction_type) = RaydiumFunction::from_data(&ui_instruction.data) {
+                                    match instruction_type {
+                                        RaydiumFunction::Initialize => {
+                                            info!("Raydium Initialize");
+                                        },
+                                        RaydiumFunction::Initialize2 => {
+                                            info!("Raydium Initialize2");
+                                            let dir_path = format!("./unknown-txs/{}", program_address);
+                                            fs::create_dir_all(&dir_path).expect("Failed to create directories");
+
+                                            let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
+
+                                            let file_path = format!("{}/{}.json", dir_path, "initialize2");
+
+                                            if !Path::new(&file_path).exists() {
+                                                let mut file = File::create(&file_path).expect("Failed to create file");
+                                                file.write_all(json.as_bytes()).expect("Failed to write to file");
+                                            }
+                                        }
                                     }
                                 }
                             }

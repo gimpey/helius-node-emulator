@@ -7,7 +7,7 @@ authors = ["gimpey <gimpey@gimpey.com"]
 repository = "https://github.com/gimpey/helius-node-emulator"
 license = "Apache-2.0"
 keywords = ["grpc", "postgresql"]
-rust-version = "1.82.0"
+rust-version = "1.83.0"
 
 [dependencies]
 bs58 = "0.5.1"
