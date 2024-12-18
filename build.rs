@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "protos/spl_token_creation.proto",
+                "protos/daos_fund.proto",
             ],
             &["protos"],
         )?;

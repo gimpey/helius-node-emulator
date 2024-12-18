@@ -1,0 +1,10 @@
+syntax = "proto3";
+package daos_fund;
+
+option go_package = "daos_fundpb";
+
+message DaosFundInitializeCurveNotification {
+    string token_address = 1;
+    string config_address = 2;
+    string curve_address = 3;
+}
