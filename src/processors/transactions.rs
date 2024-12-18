@@ -13,8 +13,9 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::instructions::pump_fun;
+use crate::instructions::{daos_fund, pump_fun};
 use crate::messaging::MpscMessage;
+use crate::programs::daos_fund_deployer::DaosFundDeployerFunction;
 use crate::programs::pump_fun::PumpFunFunction;
 use crate::programs::raydium::RaydiumFunction;
 use crate::programs::serum::SerumFunction;
@@ -293,53 +294,14 @@ impl TransactionProcessor {
             }
         }
 
-        // todo: need to implement something on a per `program_id` basis where if the instruction type is not known we write the instruction to a file
         for instruction in parsed_instructions.iter() {
             match instruction {
-                UiParsedInstruction::Parsed(_ui_instruction) => {
-                    // use std::fs::{self, File};
-                    // use std::path::Path;
-                    // use std::io::Write;
-
-                    // let program_address = &ui_instruction.program_id;
-
-                    // if let Value::Object(parsed) = &ui_instruction.parsed {
-                    //     let instruction_type = parsed
-                    //         .get("type")
-                    //         .and_then(|t| t.as_str())
-                    //         .expect("Parsed instruction does not contain a `type` field or it is not a string!");
-        
-                    //     let json = serde_json::to_string_pretty(&ui_instruction).expect("Failed to serialize notification");
-        
-                    //     let dir_path = format!("./unknown-txs/{}", program_address);
-                    //     fs::create_dir_all(&dir_path).expect("Failed to create directories");
-        
-                    //     let file_path = format!("{}/{}.json", dir_path, instruction_type);
-        
-                    //     if !Path::new(&file_path).exists() {
-                    //         let mut file = File::create(&file_path).expect("Failed to create file");
-                    //         file.write_all(json.as_bytes()).expect("Failed to write to file");
-                    //     }
-                    // } else {
-                    //     continue;
-                    // }
-                },
+                UiParsedInstruction::Parsed(_ui_instruction) => {},
                 UiParsedInstruction::PartiallyDecoded(ui_instruction) => {
                     let program_address = &ui_instruction.program_id;
 
                     if let Some(program_id) = ProgramId::from_str(&program_address) {
                         match program_id {
-                            // https://github.com/project-serum/serum-ts/blob/master/packages/serum/src/instructions.js#L33
-                            // https://github.com/project-serum/serum-ts/blob/master/packages/serum/src/instructions.js#L195
-                            ProgramId::Serum => {
-                                if let Some(instruction_type) = SerumFunction::from_data(&ui_instruction.data) {
-                                    match instruction_type {
-                                        SerumFunction::InitializeMarket => {
-                                            info!("Serum Initialize Market");
-                                        }
-                                    }
-                                }
-                            },
                             ProgramId::PumpFun => {
                                 if let Some(instruction_type) = PumpFunFunction::from_data(&ui_instruction.data) {
                                     match instruction_type {
@@ -353,6 +315,54 @@ impl TransactionProcessor {
                                         ),
                                         PumpFunFunction::Buy => pump_fun::buy::buy_handler(),
                                         PumpFunFunction::Sell => pump_fun::sell::sell_handler(),
+                                    }
+                                }
+                            },
+                            ProgramId::DaosFundDeployer => {
+                                if let Some(instruction_type) = DaosFundDeployerFunction::from_data(&ui_instruction.data) {
+                                    match instruction_type {
+                                        DaosFundDeployerFunction::InitializeCurve => {
+                                            daos_fund::initialize_curve::initialize_curve_handler(
+                                                notification.params.result.slot, 
+                                                &ui_instruction, 
+                                                accounts, 
+                                                &meta, 
+                                                &notification.params.result.signature, 
+                                                self.tx.clone()
+                                            );
+                                            info!("Daos Fund Deployer InitializeCurve");
+                                            let dir_path = format!("./unknown-txs/{}", program_address);
+                                            fs::create_dir_all(&dir_path).expect("Failed to create directories");
+
+                                            let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
+
+                                            let file_path = format!("{}/{}.json", dir_path, "initializeCurve");
+
+                                            if !Path::new(&file_path).exists() {
+                                                let mut file = File::create(&file_path).expect("Failed to create file");
+                                                file.write_all(json.as_bytes()).expect("Failed to write to file");
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            ProgramId::Serum => {
+                                if let Some(instruction_type) = SerumFunction::from_data(&ui_instruction.data) {
+                                    match instruction_type {
+                                        SerumFunction::InitializeMarket => {
+                                            info!("Serum Initialize Market");
+                                            let dir_path = format!("./unknown-txs/{}", program_address);
+                                            fs::create_dir_all(&dir_path).expect("Failed to create directories");
+
+                                            let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
+
+                                            let file_path = format!("{}/{}.json", dir_path, "intializeMarket");
+
+                                            if !Path::new(&file_path).exists() {
+                                                let mut file = File::create(&file_path).expect("Failed to create file");
+                                                file.write_all(json.as_bytes()).expect("Failed to write to file");
+                                            }
+                                        }
                                     }
                                 }
                             },
