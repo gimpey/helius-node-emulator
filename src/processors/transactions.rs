@@ -1,14 +1,14 @@
+use futures::TryStreamExt;
 use solana_transaction_status::{EncodedTransaction, EncodedTransactionWithStatusMeta, UiCompiledInstruction, UiInstruction, UiMessage, UiParsedInstruction};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream, tungstenite::{Error as WsError, Message}};
 use solana_transaction_status::option_serializer::OptionSerializer;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio::{net::TcpStream, sync::Mutex};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::UnboundedSender;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use tracing::{info, warn};
-use std::fs::{self, File};
+use std::{fs::{self, File}, io};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -85,29 +85,29 @@ impl TransactionProcessor {
         })
     }
 
+    /// Runs the three step process to start the transaction processor.
     pub async fn start_processor(&self) {
-        let mut retry_attempts = 0;
-
         loop {
-            if retry_attempts > 0 {
-                let delay = std::time::Duration::from_secs(2u64.pow((retry_attempts - 1).min(5)));
-                warn!(
-                    "Reconnecting WebSocket after {} seconds... (attempt #{})",
-                    delay.as_secs(),
-                    retry_attempts
-                );
-                tokio::time::sleep(delay).await;
+            if let Err(err) = self.start_connection().await {
+                warn!("Failed to establish connection to WebSocket: {}. Retrying in 1 second(s)...", err);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
             }
 
-            match self.start_connection().await {
+            if let Err(err) = self.subscribe_to_transactions().await {
+                warn!("Failed to subscribe to transactions: {}. Retrying in 1 second(s)...", err);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+
+            match self.process_messages().await {
                 Ok(_) => {
-                    info!("WebSocket connected successfully!");
-                    retry_attempts = 0;
-                    self.subscribe_and_process().await;
+                    info!("Message processing ended gracefully (unexpected). Stopping...");
+                    break;
                 }
                 Err(err) => {
-                    warn!("Failed to connect WebSocket: {}. Retrying...", err);
-                    retry_attempts += 1;
+                    warn!("Error while processing messages: {}. Will retry in 1 second(s)...", err);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             }
         }
@@ -125,51 +125,7 @@ impl TransactionProcessor {
         Ok(())
     }
     
-    pub async fn subscribe_and_process(&self) {
-        self.subscribe_to_transactions().await;
-
-        let mut ws_guard = self.ws.lock().await;
-
-        if let Some(ws) = ws_guard.take() {
-            let (write, mut read_stream) = ws.split();
-            let write_arc = Arc::new(Mutex::new(write));
-
-            let write_clone = write_arc.clone();
-            let heartbeat = tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                    if let Err(err) = write_clone.lock().await.send(Message::Ping(vec![])).await {
-                        eprintln!("Failed to send ping: {:?}", err);
-                        break;
-                    }
-                }
-            });
-            
-            while let Some(result) = read_stream.next().await {
-                match result {
-                    Ok(msg) => {    
-                        let processor_clone = self.clone();
-                        tokio::spawn(async move {
-                            processor_clone.handle_message(msg);
-                        });
-                    }
-                    Err(err) => {
-                        warn!("Failed to read message: {}", err);
-                        break;
-                    }
-                }
-            }
-
-            heartbeat.abort();
-            *ws_guard = None;
-
-            warn!("WebSocket connection was closed peacefully.")
-        } else {
-            println!("WebSocket is not connected!");
-        }
-    }
-
-    pub async fn subscribe_to_transactions(&self) {
+    pub async fn subscribe_to_transactions(&self) -> Result<(), Box<dyn std::error::Error>> {
         let request = json!({
             "jsonrpc": "2.0",
             "id": "1",
@@ -197,50 +153,96 @@ impl TransactionProcessor {
         let mut ws_guard = self.ws.lock().await;
 
         if let Some(ws) = ws_guard.as_mut() {
-            if let Err(err) = ws.send(Message::Text(request_string)).await {
-                eprintln!("Failed to send subscription request: {}", err);
-            } else {
-                println!("Subscription request sent successfully.");
-            }
+            ws.send(Message::Text(request_string)).await?;
+            info!("Subscription to transactions successfully sent.");
+            Ok(())
         } else {
-            eprintln!("WebSocket is not connected!");
+            Err("WebSocket is not connected!".into())
         }
     }
 
-    pub fn handle_message(&self, message: Message) {
+    pub async fn process_messages(&self) -> Result<(), WsError> {
+        let mut ws_guard = self.ws.lock().await;
+        let ws = ws_guard.take().ok_or_else(|| {
+            WsError::Io(io::Error::new(io::ErrorKind::Other, "WebSocket is not connected!"))
+        })?;
+
+        let (write, read) = ws.split();
+
+        let write_arc = Arc::new(Mutex::new(write));
+
+        let write_clone = write_arc.clone();
+        let heartbeat = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                if let Err(err) = write_clone.lock().await.send(Message::Ping(vec![])).await {
+                    eprintln!("Failed to send ping: {:?}", err);
+                    break;
+                }
+            }
+        });
+
+        let result = read.try_for_each_concurrent(16, |msg| {
+            let this = self.clone();
+            async move { this.handle_message(msg).await }
+        }).await;
+
+        heartbeat.abort();
+
+        match result {
+            Ok(()) => {
+                // If we reach here, it means the stream ended gracefully (connection closed).
+                warn!("WebSocket connection closed.");
+                Ok(())
+            }
+            Err(e) => {
+                // If we encounter an error (like a subscription error that couldn't be fixed 
+                // or a read error), this will trigger the logic in `start_processor` to 
+                // reconnect and/or resubscribe.
+                warn!("Error processing messages: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    async fn handle_message(&self, message: Message) -> Result<(), WsError> {
         match message {
             Message::Text(text) => {
-                let json: Value = serde_json::from_str(&text).unwrap();
+                let json: Value = serde_json::from_str(&text)
+                    .map_err(|e| WsError::Io(io::Error::new(io::ErrorKind::Other, format!("JSON parse error: {}", e))))?;
     
                 if let Ok(notification) = serde_json::from_value::<TransactionNotification>(json.clone()) {
                     self.handle_transaction_notification(notification);
-                    return;
+                    return Ok(());
                 }
     
                 if let Ok(notification) = serde_json::from_value::<SubscriptionSuccessfulNotification>(json.clone()) {
                     info!("Subscription successful: {:?}", notification);
-                    return;
+                    return Ok(());
                 }
 
                 if let Ok(notification) = serde_json::from_value::<SubscriptionErrorNotification>(json.clone()) {
                     warn!("Subscription error: {:?}", notification);
-                    
-                    let tx_clone = self.clone();
-                    tokio::spawn(async move {
-                        if tx_clone.start_connection().await.is_ok() {
-                            tx_clone.subscribe_to_transactions().await;
-                        } else {
-                            warn!("Failed to re-establish WebSocket connection after subscription error.");
-                        }
-                    });
-
-                    return;
+    
+                    self.subscribe_to_transactions().await.map_err(|e| {
+                        WsError::Io(io::Error::new(io::ErrorKind::Other, format!("Failed to re-subscribe after error: {}", e)))
+                    })?;
+    
+                    info!("Re-subscription successful after error.");
+                    return Ok(());
                 }
 
-                println!("Unknown JSON message: {}", text);
+                info!("Unknown JSON message: {}", text);
+                Ok(())
             }
-            Message::Pong(_data) => info!("WebSocket server responded with Pong."),
-            other => println!("Unknown message: {:?}", other)
+            Message::Pong(_data) => {
+                info!("WebSocket server responded with Pong.");
+                Ok(())
+            }
+            other => {
+                println!("Unknown message: {:?}", other);
+                Ok(())
+            }
         }
     }
 
