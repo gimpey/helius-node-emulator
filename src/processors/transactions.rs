@@ -13,6 +13,8 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::instructions::raydium::initialize_two::initialize_two_handler;
+use crate::instructions::serum::initialize_market::initialize_market_handler;
 use crate::instructions::{daos_fund, pump_fun};
 use crate::messaging::MpscMessage;
 use crate::programs::daos_fund_deployer::DaosFundDeployerFunction;
@@ -57,17 +59,6 @@ pub struct SubscriptionSuccessfulNotification {
     jsonrpc: String,
     result: u64
 }
-
-// todo: if we get the below we need to resubscribe
-// Unknown JSON message: 
-// {
-//     "jsonrpc":"2.0",
-//     "method":"transactionSubscribe",
-//     "params":{
-//         "subscription":879524311758297,
-//         "error":"Status { code: Internal, message: \"h2 protocol error: error reading a body from connection\", source: Some(hyper::Error(Body, Error { kind: Reset(StreamId(1), INTERNAL_ERROR, Remote) })) }"
-//     }
-// }
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -236,7 +227,11 @@ impl TransactionProcessor {
                     
                     let tx_clone = self.clone();
                     tokio::spawn(async move {
-                        tx_clone.subscribe_to_transactions().await;
+                        if tx_clone.start_connection().await.is_ok() {
+                            tx_clone.subscribe_to_transactions().await;
+                        } else {
+                            warn!("Failed to re-establish WebSocket connection after subscription error.");
+                        }
                     });
 
                     return;
@@ -349,43 +344,23 @@ impl TransactionProcessor {
                             ProgramId::Serum => {
                                 if let Some(instruction_type) = SerumFunction::from_data(&ui_instruction.data) {
                                     match instruction_type {
-                                        SerumFunction::InitializeMarket => {
-                                            info!("Serum Initialize Market");
-                                            let dir_path = format!("./unknown-txs/{}", program_address);
-                                            fs::create_dir_all(&dir_path).expect("Failed to create directories");
-
-                                            let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
-
-                                            let file_path = format!("{}/{}.json", dir_path, "intializeMarket");
-
-                                            if !Path::new(&file_path).exists() {
-                                                let mut file = File::create(&file_path).expect("Failed to create file");
-                                                file.write_all(json.as_bytes()).expect("Failed to write to file");
-                                            }
-                                        }
+                                        SerumFunction::InitializeMarket => initialize_market_handler(
+                                            &ui_instruction, 
+                                            accounts, 
+                                            self.tx.clone(),
+                                            &notification.params.result.signature
+                                        ),
                                     }
                                 }
                             },
                             ProgramId::Raydium => {
                                 if let Some(instruction_type) = RaydiumFunction::from_data(&ui_instruction.data) {
                                     match instruction_type {
-                                        RaydiumFunction::Initialize => {
-                                            info!("Raydium Initialize");
-                                        },
-                                        RaydiumFunction::Initialize2 => {
-                                            info!("Raydium Initialize2");
-                                            let dir_path = format!("./unknown-txs/{}", program_address);
-                                            fs::create_dir_all(&dir_path).expect("Failed to create directories");
-
-                                            let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
-
-                                            let file_path = format!("{}/{}.json", dir_path, "initialize2");
-
-                                            if !Path::new(&file_path).exists() {
-                                                let mut file = File::create(&file_path).expect("Failed to create file");
-                                                file.write_all(json.as_bytes()).expect("Failed to write to file");
-                                            }
-                                        }
+                                        RaydiumFunction::Initialize => info!("Raydium Initialize"),
+                                        RaydiumFunction::Initialize2 => initialize_two_handler(
+                                            &ui_instruction,
+                                            &notification.params.result.signature
+                                        )
                                     }
                                 }
                             }
