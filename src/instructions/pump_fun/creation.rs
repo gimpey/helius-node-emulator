@@ -9,11 +9,11 @@ use chrono::Utc;
 
 use crate::{helpers::find_token_balance_by_address::find_token_balance_by_address, messaging::MpscMessage};
 
-pub mod spl_token_creation {
-    tonic::include_proto!("spl_token_creation");
+pub mod spl_token {
+    tonic::include_proto!("spl_token");
 }
 
-use spl_token_creation::SplTokenCreationNotification;
+use spl_token::SplTokenCreationNotification;
 
 #[derive(Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct CreateDataSchema {
