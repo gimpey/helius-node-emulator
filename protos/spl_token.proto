@@ -1,7 +1,7 @@
 syntax = "proto3";
-package spl_token_creation;
+package spl_token;
 
-option go_package = "spl_token_creationpb";
+option go_package = "spl_tokenpb";
 
 enum Source {
     HELIUS = 0;
@@ -25,4 +25,12 @@ message SplTokenCreationNotification {
     string tx_hash = 10;
     string source = 11;
     string platform = 12;
+}
+
+message SplBalanceUpdate {
+    string address = 1;
+    string mint = 2;
+    uint64 pre_balance = 3;
+    uint64 post_balance = 4;
+    uint32 decimals = 5;
 }
