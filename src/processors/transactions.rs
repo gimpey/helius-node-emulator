@@ -1,27 +1,42 @@
-use futures::TryStreamExt;
 use solana_transaction_status::{EncodedTransaction, EncodedTransactionWithStatusMeta, UiCompiledInstruction, UiInstruction, UiMessage, UiParsedInstruction};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream, tungstenite::{Error as WsError, Message}};
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream, tungstenite::{Error as WsError, Message as WsMessage}};
 use solana_transaction_status::option_serializer::OptionSerializer;
+use std::{collections::HashSet, fs::{self, File}, io};
 use tokio::{net::TcpStream, sync::Mutex};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::UnboundedSender;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
+use futures::TryStreamExt;
 use tracing::{info, warn};
-use std::{fs::{self, File}, io};
-use std::io::Write;
+use redis::AsyncCommands;
+use deadpool_redis::Pool;
 use std::path::Path;
+use std::io::Write;
 use std::sync::Arc;
+use prost::Message;
+use yansi::Paint;
 
-use crate::instructions::raydium::initialize_two::initialize_two_handler;
+use crate::{constants::{redis::TRACKED_USER_ADDRESSES, zmq::{LAMPORTS_BALANCE_UPDATE, SPL_TOKEN_BALANCE_UPDATE}}, instructions::raydium::initialize_two::initialize_two_handler, transaction_helpers::compile_balance_updates::compile_balance_updates};
 use crate::instructions::serum::initialize_market::initialize_market_handler;
-use crate::instructions::{daos_fund, pump_fun};
-use crate::messaging::MpscMessage;
 use crate::programs::daos_fund_deployer::DaosFundDeployerFunction;
+use crate::instructions::{daos_fund, pump_fun};
 use crate::programs::pump_fun::PumpFunFunction;
 use crate::programs::raydium::RaydiumFunction;
 use crate::programs::serum::SerumFunction;
+use crate::messaging::MpscMessage;
 use crate::programs::ProgramId;
+
+pub mod spl_token {
+    tonic::include_proto!("spl_token");
+}
+
+pub mod system {
+    tonic::include_proto!("system");
+}
+
+use system::LamportsBalanceUpdate;
+use spl_token::SplBalanceUpdate;
 
 #[derive(Clone)]
 pub struct TransactionProcessor {
@@ -29,6 +44,7 @@ pub struct TransactionProcessor {
     url: String,
     ws: Arc<Mutex<Option<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
     tx: UnboundedSender<MpscMessage>,
+    redis_pool: Arc<Pool>
 }
 
 /// https://github.com/helius-labs/helius-rust-sdk/blob/dev/src/types/enhanced_websocket.rs#L96
@@ -65,7 +81,7 @@ pub struct SubscriptionSuccessfulNotification {
 pub struct SubscriptionErrorParams {
     subscription: u64,
     error: String
-}
+} 
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -76,12 +92,13 @@ pub struct SubscriptionErrorNotification {
 }
 
 impl TransactionProcessor {
-    pub async fn new(api_key: &str, url: &str, tx: UnboundedSender<MpscMessage>) -> Result<Self, WsError> {
+    pub async fn new(api_key: &str, url: &str, tx: UnboundedSender<MpscMessage>, redis_pool: Arc<Pool>) -> Result<Self, WsError> {
         Ok(Self {
             api_key: api_key.to_string(),
             url: url.to_string(),
             ws: Arc::new(Mutex::new(None)),
-            tx
+            tx,
+            redis_pool
         })
     }
 
@@ -153,7 +170,7 @@ impl TransactionProcessor {
         let mut ws_guard = self.ws.lock().await;
 
         if let Some(ws) = ws_guard.as_mut() {
-            ws.send(Message::Text(request_string)).await?;
+            ws.send(WsMessage::Text(request_string)).await?;
             info!("Subscription to transactions successfully sent.");
             Ok(())
         } else {
@@ -175,13 +192,18 @@ impl TransactionProcessor {
         let heartbeat = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                if let Err(err) = write_clone.lock().await.send(Message::Ping(vec![])).await {
+                if let Err(err) = write_clone.lock().await.send(WsMessage::Ping(vec![])).await {
                     eprintln!("Failed to send ping: {:?}", err);
                     break;
                 }
             }
         });
 
+        // todo: see below
+        // ! It's possible that this could lead to issues in the event that a later message
+        // ! is processed first compared to an earlier message. If the later message contains
+        // ! an account that is also updated in the former message, and the former message
+        // ! is processed after, then you'd technically have stale data.
         let result = read.try_for_each_concurrent(16, |msg| {
             let this = self.clone();
             async move { this.handle_message(msg).await }
@@ -205,14 +227,14 @@ impl TransactionProcessor {
         }
     }
 
-    async fn handle_message(&self, message: Message) -> Result<(), WsError> {
+    async fn handle_message(&self, message: WsMessage) -> Result<(), WsError> {
         match message {
-            Message::Text(text) => {
+            WsMessage::Text(text) => {
                 let json: Value = serde_json::from_str(&text)
                     .map_err(|e| WsError::Io(io::Error::new(io::ErrorKind::Other, format!("JSON parse error: {}", e))))?;
     
                 if let Ok(notification) = serde_json::from_value::<TransactionNotification>(json.clone()) {
-                    self.handle_transaction_notification(notification);
+                    let _ = self.handle_transaction_notification(notification).await;
                     return Ok(());
                 }
     
@@ -235,7 +257,7 @@ impl TransactionProcessor {
                 info!("Unknown JSON message: {}", text);
                 Ok(())
             }
-            Message::Pong(_data) => {
+            WsMessage::Pong(_data) => {
                 info!("WebSocket server responded with Pong.");
                 Ok(())
             }
@@ -246,7 +268,7 @@ impl TransactionProcessor {
         }
     }
 
-    fn handle_transaction_notification(&self, notification: TransactionNotification) {
+    async fn handle_transaction_notification(&self, notification: TransactionNotification) -> Result<(), WsError> {
         let meta = match &notification.params.result.transaction.meta {
             Some(meta) => meta,
             None => {
@@ -310,8 +332,20 @@ impl TransactionProcessor {
                                             &notification.params.result.signature,
                                             self.tx.clone()
                                         ),
-                                        PumpFunFunction::Buy => pump_fun::buy::buy_handler(),
-                                        PumpFunFunction::Sell => pump_fun::sell::sell_handler(),
+                                        PumpFunFunction::Buy => pump_fun::trade::trade_handler(
+                                            &ui_instruction,
+                                            accounts,
+                                            &meta,
+                                            self.redis_pool.clone(),
+                                            self.tx.clone()
+                                        ).await?,
+                                        PumpFunFunction::Sell => pump_fun::trade::trade_handler(
+                                            &ui_instruction,
+                                            accounts,
+                                            &meta,
+                                            self.redis_pool.clone(),
+                                            self.tx.clone()
+                                        ).await?,
                                     }
                                 }
                             },
@@ -361,6 +395,7 @@ impl TransactionProcessor {
                                         RaydiumFunction::Initialize => info!("Raydium Initialize"),
                                         RaydiumFunction::Initialize2 => initialize_two_handler(
                                             &ui_instruction,
+                                            accounts,
                                             &notification.params.result.signature
                                         )
                                     }
@@ -372,18 +407,69 @@ impl TransactionProcessor {
             };
         }
 
-        // todo: iterate through accounts and send an account update if the sol balance updates
-        // Likely fastest way to do this:
-        // 1. Create a map between pre and post sol balances
-        // 2. If the balance changes, then we check if the address is a tracked address
-        //    Option A. first get the redis set of tracked addresses (think this is faster)
-        //    Option B. simply check if the address exists in the set 
-        // 3. If the address is tracked, then we send a balance update message
-        // 4. If the address is not tracked, then we continue
+        let mut conn = self.redis_pool.get().await.map_err(|e| {
+            WsError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Redis pool error: {}", e)))
+        })?;
 
-        // ! FOR DEBUGGING
-        // let json = serde_json::to_string_pretty(&notification).expect("Failed to serialize notification");
-        // let mut file = File::create(format!("./tx-files/transaction-{}.json", &notification.params.result.signature)).expect("Failed to create file");
-        // file.write_all(json.as_bytes()).expect("Failed to write to file");
+        let tracked_addresses: HashSet<String> = conn.smembers(TRACKED_USER_ADDRESSES).await.map_err(|e| {
+            WsError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Redis SMEMBERS error: {}", e)))
+        })?;
+
+        let pre_balances = &meta.pre_balances;
+        let post_balances = &meta.post_balances;
+        for (i, account) in accounts.iter().enumerate() {
+            let pre_balance = *pre_balances.get(i).unwrap_or(&0);
+            let post_balance = *post_balances.get(i).unwrap_or(&0);
+            
+            if pre_balance != post_balance && tracked_addresses.contains(&account.pubkey) {
+                let mpsc_message = LamportsBalanceUpdate {
+                    address: account.pubkey.to_string(),
+                    pre_balance,
+                    post_balance,
+                };
+
+                self.tx.send(MpscMessage {
+                    topic: LAMPORTS_BALANCE_UPDATE.to_string(),
+                    payload: mpsc_message.encode_to_vec(),
+                }).expect("Failed to send MPSC Message.");
+
+                info!(
+                    "Sending {} for {}", 
+                    Paint::magenta("BALANCE_UPDATE"), 
+                    Paint::cyan(account.pubkey.to_string())
+                );
+            }
+        }
+
+        let pre_token_balances = meta.pre_token_balances.clone().unwrap();
+        let post_token_balances = meta.post_token_balances.clone().unwrap();
+        let token_balance_updates = compile_balance_updates(&pre_token_balances, &post_token_balances);
+        for (key, update) in token_balance_updates {
+            // By definition of the transaction pre- and post- token balances,
+            // the pre-balance and post-balances will always be different. This means
+            // we do not need to perform an additional check like we do for the SOL amounts.
+            if tracked_addresses.contains(&key.owner) {
+                let mpsc_message = SplBalanceUpdate {
+                    address: key.owner.to_string(),
+                    mint: key.mint,
+                    pre_balance: update.pre,
+                    post_balance: update.post,
+                    decimals: update.decimals as u32,
+                };
+
+                self.tx.send(MpscMessage {
+                    topic: SPL_TOKEN_BALANCE_UPDATE.to_string(),
+                    payload: mpsc_message.encode_to_vec(),
+                }).expect("Failed to send MPSC Message.");
+
+                info!(
+                    "Sending {} for {}",
+                    Paint::magenta("SPL_BALANCE_UPDATE"),
+                    Paint::cyan(key.owner)
+                );
+            }
+        }
+
+        Ok(())
     }
 }
