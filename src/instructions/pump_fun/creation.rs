@@ -7,7 +7,7 @@ use tracing::info;
 use yansi::Paint;
 use chrono::Utc;
 
-use crate::{helpers::find_token_balance_by_address::find_token_balance_by_address, messaging::MpscMessage};
+use crate::{messaging::MpscMessage, transaction_helpers::find_token_balance_by_address::find_token_balance_by_address};
 
 pub mod spl_token {
     tonic::include_proto!("spl_token");

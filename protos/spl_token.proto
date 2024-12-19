@@ -34,3 +34,12 @@ message SplBalanceUpdate {
     uint64 post_balance = 4;
     uint32 decimals = 5;
 }
+
+message PumpFunTradeUpdate {
+    string token_address = 1;
+    string bonding_curve = 2;
+    uint64 real_lamport_reserves = 4;
+    uint64 real_token_reserves = 5;
+    uint64 virtual_lamport_reserves = 6;
+    uint64 virtual_token_reserves = 7;
+}
