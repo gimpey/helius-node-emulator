@@ -10,6 +10,7 @@ pub mod transaction_helpers;
 pub mod instructions;
 pub mod processors;
 pub mod messaging;
+pub mod constants;
 pub mod programs;
 pub mod helpers;
 
