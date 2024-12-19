@@ -34,6 +34,10 @@ yansi = "0.5"
 prost = "0.13"
 tonic = "0.12"
 
+# redis necessities
+deadpool-redis = "0.18.0"
+redis = "0.27"
+
 [build-dependencies]
 tonic-build = "0.12"
 
