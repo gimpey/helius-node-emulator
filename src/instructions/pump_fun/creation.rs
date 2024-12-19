@@ -1,3 +1,8 @@
+/// # Pump Fun Creation Detection
+/// 
+/// REQUIRES REDIS: FALSE
+/// REQUIRES ZMQ: TRUE
+
 use solana_transaction_status::{option_serializer::OptionSerializer, parse_accounts::ParsedAccount, UiPartiallyDecodedInstruction, UiTransactionStatusMeta};
 use borsh::{BorshDeserialize, BorshSerialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -7,7 +12,7 @@ use tracing::info;
 use yansi::Paint;
 use chrono::Utc;
 
-use crate::{messaging::MpscMessage, transaction_helpers::find_token_balance_by_address::find_token_balance_by_address};
+use crate::{constants::zmq::SPL_TOKEN_CREATION_UPDATE, messaging::MpscMessage, transaction_helpers::find_token_balance_by_address::find_token_balance_by_address};
 
 pub mod spl_token {
     tonic::include_proto!("spl_token");
@@ -92,7 +97,7 @@ pub fn creation_handler(
     };
 
     tx.send(MpscMessage {
-        topic: "spl_token_creation".to_string(),
+        topic: SPL_TOKEN_CREATION_UPDATE.to_string(),
         payload: message.encode_to_vec(),
     }).expect("Failed to send MPSC Message.");
 

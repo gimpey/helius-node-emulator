@@ -1,27 +1,36 @@
-use deadpool_redis::Pool;
-use prost::Message;
-use redis::AsyncCommands;
+/// # Pump Fun Trade Detection
+/// 
+/// REQUIRES REDIS: TRUE
+/// REQUIRES ZMQ: TRUE
+
 use solana_transaction_status::{parse_accounts::ParsedAccount, UiPartiallyDecodedInstruction, UiTransactionStatusMeta};
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::info;
+use deadpool_redis::Pool;
+use redis::AsyncCommands;
 use std::{io, sync::Arc};
+use prost::Message;
+use tracing::info;
 use yansi::Paint;
 
-use crate::{messaging::MpscMessage, transaction_helpers::find_token_balance_by_address::find_token_balance_by_address};
+use crate::{
+    constants::{
+        redis::TRACKED_TOKEN_ADDRESSES, 
+        zmq::PUMP_FUN_BONDING_CURVE_UPDATE
+    }, 
+    messaging::MpscMessage, transaction_helpers::find_token_balance_by_address::find_token_balance_by_address
+};
 
 pub mod spl_token {
     tonic::include_proto!("spl_token");
 }
 
-use spl_token::PumpFunTradeUpdate;
+use spl_token::PumpFunBondingCurveUpdate;
 
 const INITIAL_LAMPORT_RESERVES: u64 = 30_000_000_000;
 const INITIAL_VIRTUAL_TOKEN_RESERVES: u64 = 1_073_000_000_000_000;
 const INITIAL_REAL_TOKEN_RESERVES: u64 = 793_100_000_000_000;
 const INITIAL_TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000;
-
-const TRACKED_TOKENS_KEY: &str = "tracked_token_addresses";
 
 pub async fn trade_handler(
     instruction: &UiPartiallyDecodedInstruction,
@@ -36,7 +45,7 @@ pub async fn trade_handler(
         WsError::Io(io::Error::new(io::ErrorKind::Other, format!("Failed to get Redis connection: {:?}", e)));
     }).expect("Failed to get Redis connection.");
 
-    let is_tracked: bool = conn.sismember(TRACKED_TOKENS_KEY, &token_address).await.map_err(|e| {
+    let is_tracked: bool = conn.sismember(TRACKED_TOKEN_ADDRESSES, &token_address).await.map_err(|e| {
         WsError::Io(io::Error::new(io::ErrorKind::Other, format!("Failed to check if token is tracked: {:?}", e)));
     }).unwrap_or(false);
 
@@ -59,7 +68,7 @@ pub async fn trade_handler(
     let virtual_token_reserves = bonding_curve_token_balance + (INITIAL_VIRTUAL_TOKEN_RESERVES - INITIAL_TOKEN_TOTAL_SUPPLY);
     let real_token_reserves = bonding_curve_token_balance - (INITIAL_TOKEN_TOTAL_SUPPLY - INITIAL_REAL_TOKEN_RESERVES);
 
-    let message = PumpFunTradeUpdate {
+    let message = PumpFunBondingCurveUpdate {
         token_address: token_address.clone(),
         bonding_curve: bonding_curve.to_string(),
         real_lamport_reserves: *real_lamport_reserves,
@@ -69,7 +78,7 @@ pub async fn trade_handler(
     };
 
     tx.send(MpscMessage {
-        topic: "pump_fun_bonding_curve_update".to_string(),
+        topic: PUMP_FUN_BONDING_CURVE_UPDATE.to_string(),
         payload: message.encode_to_vec()
     }).expect("Failed to send MPSC Message.");
 
