@@ -35,11 +35,28 @@ message SplBalanceUpdate {
     uint32 decimals = 5;
 }
 
-message PumpFunTradeUpdate {
+message PumpFunBondingCurveUpdate {
     string token_address = 1;
     string bonding_curve = 2;
     uint64 real_lamport_reserves = 4;
     uint64 real_token_reserves = 5;
     uint64 virtual_lamport_reserves = 6;
     uint64 virtual_token_reserves = 7;
+}
+
+message SerumMarketCreation {
+    string market_id_address = 1;
+    string request_queue_address = 2;
+    string event_queue_address = 3;
+    string bids_address = 4;
+    string asks_address = 5;
+    string base_spl_token_account_address = 6;
+    string quote_spl_token_account_address = 7;
+    string base_token_address = 8;
+    string quote_token_address = 9;
+    uint64 base_lot_size = 10;
+    uint64 quote_lot_size = 11;
+    uint32 fee_rate_bps = 12;
+    uint64 vault_signer_nonce = 13;
+    uint64 quote_dust_threshold = 14;
 }
