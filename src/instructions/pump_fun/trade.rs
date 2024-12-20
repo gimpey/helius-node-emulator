@@ -16,7 +16,7 @@ use deadpool_redis::Pool;
 use redis::AsyncCommands;
 use std::{io, sync::Arc};
 use prost::Message;
-use tracing::info;
+use tracing::{info, warn};
 use yansi::Paint;
 
 use crate::{
@@ -41,6 +41,9 @@ const INITIAL_VIRTUAL_TOKEN_RESERVES: u64 = 1_073_000_000_000_000;
 const INITIAL_REAL_TOKEN_RESERVES: u64 = 793_100_000_000_000;
 const INITIAL_TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000;
 
+const LIQUIDITY_POOL_TOKEN_FUNDING_AMOUNT: u64 = INITIAL_TOKEN_TOTAL_SUPPLY - INITIAL_REAL_TOKEN_RESERVES;
+const VIRTUAL_LIQUIDITY_TOKEN_SEED: u64 = INITIAL_VIRTUAL_TOKEN_RESERVES - INITIAL_REAL_TOKEN_RESERVES;
+
 pub async fn trade_handler(
     instruction: &UiPartiallyDecodedInstruction,
     accounts: &Vec<ParsedAccount>,
@@ -62,8 +65,17 @@ pub async fn trade_handler(
     };
 
     let virtual_lamport_reserves = real_lamport_reserves + INITIAL_LAMPORT_RESERVES;
-    let virtual_token_reserves = bonding_curve_token_balance + (INITIAL_VIRTUAL_TOKEN_RESERVES - INITIAL_TOKEN_TOTAL_SUPPLY);
-    let real_token_reserves = bonding_curve_token_balance - (INITIAL_TOKEN_TOTAL_SUPPLY - INITIAL_REAL_TOKEN_RESERVES);
+    let virtual_token_reserves = bonding_curve_token_balance + VIRTUAL_LIQUIDITY_TOKEN_SEED;
+    let real_token_reserves = match bonding_curve_token_balance.checked_sub(LIQUIDITY_POOL_TOKEN_FUNDING_AMOUNT) {
+        Some(amount) => amount,
+        None => {
+            warn!("Real token reserves encountered underflow for {}", Paint::black(&token_address));
+            warn!("{} Bonding Curve Token Balance: {}", Paint::red(">"), &bonding_curve_token_balance);
+            warn!("{} Liquidity Pool Token Funding Amount: {}", Paint::red(">"), LIQUIDITY_POOL_TOKEN_FUNDING_AMOUNT);
+            warn!("{} Continuing assuming the balance is 0.", Paint::red(">"));
+            0
+        }
+    };
 
     if real_token_reserves == 0 {
         info!(

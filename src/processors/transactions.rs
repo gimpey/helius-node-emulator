@@ -167,7 +167,11 @@ impl TransactionProcessor {
 
         let request_string = request.to_string();
 
+        info!("Unlocking WebSocket mutex...");
+
         let mut ws_guard = self.ws.lock().await;
+
+        info!("WebSocket mutex unlocked.");
 
         if let Some(ws) = ws_guard.as_mut() {
             ws.send(WsMessage::Text(request_string)).await?;
@@ -245,6 +249,7 @@ impl TransactionProcessor {
 
                 if let Ok(notification) = serde_json::from_value::<SubscriptionErrorNotification>(json.clone()) {
                     warn!("Subscription error: {:?}", notification);
+                    warn!("Sending re-subscription request...");
     
                     self.subscribe_to_transactions().await.map_err(|e| {
                         WsError::Io(io::Error::new(io::ErrorKind::Other, format!("Failed to re-subscribe after error: {}", e)))
