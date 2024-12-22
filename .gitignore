@@ -13,3 +13,6 @@ unknown-txs
 node_modules
 js-package/protos
 js-package/dist
+
+# proxying requests
+proxies.yaml

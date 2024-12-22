@@ -37,6 +37,8 @@ tonic = "0.12"
 # redis necessities
 deadpool-redis = "0.18.0"
 redis = "0.27"
+once_cell = "1.20"
+serde_yaml = "0.9"
 
 [build-dependencies]
 tonic-build = "0.12"
