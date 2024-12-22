@@ -1,10 +1,11 @@
 use deadpool_redis::{Config, Runtime};
+use processors::blockhashes::BlockhashProcessor;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing_subscriber::EnvFilter;
 use tokio::sync::mpsc;
 use dotenv::dotenv;
 use tracing::info;
-use std::{env, sync::Arc};
+use std::{env, io, sync::Arc};
 
 pub mod transaction_helpers;
 pub mod instructions;
@@ -26,7 +27,6 @@ async fn main() -> Result<(), WsError> {
 
     info!("Starting the Helius Node Emulator microservice...");
 
-    let url = "atlas-mainnet.helius-rpc.com";
     let api_key = env::var("HELIUS_RPC_API_KEY").expect("HELIUS_RPC_API_KEY must be set");
 
     let (tx, mut rx) = mpsc::unbounded_channel::<messaging::MpscMessage>();
@@ -51,13 +51,28 @@ async fn main() -> Result<(), WsError> {
         }
     });
 
+    let mut blockhash_processor = BlockhashProcessor::new(
+        pool.clone()
+    ).await.map_err(|e: reqwest::Error| {
+        WsError::Io(io::Error::new(io::ErrorKind::Other, e.to_string()))
+    })?;
+
     let transaction_processor = processors::transactions::TransactionProcessor::new(
         &api_key, 
-        url, 
+        "atlas-mainnet.helius-rpc.com",
         tx, 
         pool
     ).await?;
-    transaction_processor.start_processor().await;
+
+    let blockhash_processor_task = tokio::spawn(async move {
+        let _ = blockhash_processor.start_processor().await;
+    });
+
+    let transaction_processor_task = tokio::spawn(async move {
+        transaction_processor.start_processor().await;
+    });
+
+    let _ = tokio::join!(blockhash_processor_task, transaction_processor_task);
 
     Ok(())
 }
