@@ -1,5 +1,17 @@
-use solana_transaction_status::{EncodedTransaction, EncodedTransactionWithStatusMeta, UiCompiledInstruction, UiInstruction, UiMessage, UiParsedInstruction};
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream, tungstenite::{Error as WsError, Message as WsMessage}};
+use solana_transaction_status::{
+    EncodedTransaction, 
+    EncodedTransactionWithStatusMeta, 
+    UiCompiledInstruction, 
+    UiInstruction, 
+    UiMessage, 
+    UiParsedInstruction
+};
+use tokio_tungstenite::{
+    connect_async, 
+    MaybeTlsStream, 
+    WebSocketStream, 
+    tungstenite::{Error as WsError, Message as WsMessage}
+};
 use solana_transaction_status::option_serializer::OptionSerializer;
 use std::{collections::HashSet, fs::{self, File}, io};
 use tokio::{net::TcpStream, sync::Mutex};
@@ -17,7 +29,14 @@ use std::sync::Arc;
 use prost::Message;
 use yansi::Paint;
 
-use crate::{constants::{redis::TRACKED_USER_ADDRESSES, zmq::{LAMPORTS_BALANCE_UPDATE, SPL_TOKEN_BALANCE_UPDATE}}, instructions::raydium::initialize_two::initialize_two_handler, transaction_helpers::compile_balance_updates::compile_balance_updates};
+use crate::{
+    constants::{
+        redis::TRACKED_USER_ADDRESSES, 
+        zmq::{LAMPORTS_BALANCE_UPDATE, SPL_TOKEN_BALANCE_UPDATE}
+    }, 
+    instructions::raydium::initialize_two::initialize_two_handler, 
+    transaction_helpers::compile_balance_updates::compile_balance_updates
+};
 use crate::instructions::serum::initialize_market::initialize_market_handler;
 use crate::programs::daos_fund_deployer::DaosFundDeployerFunction;
 use crate::instructions::{daos_fund, pump_fun};
@@ -142,7 +161,7 @@ impl TransactionProcessor {
         Ok(())
     }
     
-    pub async fn subscribe_to_transactions(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn subscribe_to_transactions(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let request = json!({
             "jsonrpc": "2.0",
             "id": "1",
@@ -259,7 +278,7 @@ impl TransactionProcessor {
                     return Ok(());
                 }
 
-                info!("Unknown JSON message: {}", text);
+                warn!("Unknown JSON message: {}", text);
                 Ok(())
             }
             WsMessage::Pong(_data) => {
