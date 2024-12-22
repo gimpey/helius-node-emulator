@@ -75,6 +75,8 @@ pub static PROXY_URLS: Lazy<Vec<String>> = Lazy::new(|| {
     config.proxies
 });
 
+const DESIRED_EXPIRATIONS: [f64; 5] = [5.0, 15.0, 30.0, 45.0, 60.0];
+
 impl BlockhashProcessor {
     pub async fn new(redis_pool: Arc<Pool>) -> Result<Self, Error> {
         Ok(Self {
@@ -197,7 +199,6 @@ impl BlockhashProcessor {
 
             let blockhash = response.result.value.blockhash.clone();
 
-            // todo: I think technically we need to push mock slots in case of a missed slot. I.e. the slot_diff > 1
             self.recent_hashes.push(SlotBlockhash {
                 slot: new_slot,
                 blockhash: blockhash.clone(),
@@ -225,8 +226,7 @@ impl BlockhashProcessor {
             conn.set::<&str, String, ()>("recent_blockhash", latest.blockhash.clone()).await?;
         }
 
-        let expirations = [5.0, 15.0, 30.0, 45.0, 60.0];
-        for t in &expirations {
+        for t in &DESIRED_EXPIRATIONS {
             if let Some(candidate) = self.find_blockhash_closest_to_expiry(current_slot, *t) {
                 let key = format!("recent_blockhash_with_expiration:{}", t);
                 conn.set::<String, String, ()>(key, candidate).await?;
@@ -236,6 +236,9 @@ impl BlockhashProcessor {
         Ok(())
     }
 
+    /// # Find the Blockhash Closest to Desired Expiry
+    /// To note, we do not need to push mock blockhashes if one is missed given we calculate the remaining time
+    /// based on the slot delta and the average block time.
     pub fn find_blockhash_closest_to_expiry(&self, current_slot: u64, target_secs: f64) -> Option<String> {
         let avg_block_time = self.rolling_50.average() as f64; 
         if avg_block_time <= 0.0 {
