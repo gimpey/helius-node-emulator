@@ -178,24 +178,26 @@ impl BlockhashProcessor {
                     let delta_secs = (now - self.last_instant.unwrap()).as_secs_f64();
                     let avg_per_block = delta_secs / (slot_diff as f64);
 
-                    // Push into rolling average N times, or do a weighted approach
                     for _ in 0..slot_diff {
                         self.rolling_50.push(avg_per_block);
                         self.rolling_150.push(avg_per_block);
                     }
-
-                    info!(
-                        "Confirmed {} slots {} in {:.2}ms, avg slot: ~{:.3}ms {}",
-                        slot_diff,
-                        Paint::black(new_slot.clone()),
-                        delta_secs * 1000.0,
-                        Paint::cyan(self.rolling_150.average() * 1000.0),
-                        Paint::black(response.result.value.blockhash.clone())
-                    );
+                    
+                    if new_slot % 10 == 0 {
+                        info!(
+                            "Confirmed slot {} in {:.2}ms, avg slot: ~{:.3}ms {}",
+                            Paint::black(new_slot.clone()),
+                            delta_secs * 1000.0,
+                            Paint::cyan(self.rolling_150.average() * 1000.0),
+                            Paint::black(response.result.value.blockhash.clone())
+                        );
+                    }
                 }
             }
 
             let blockhash = response.result.value.blockhash.clone();
+
+            // todo: I think technically we need to push mock slots in case of a missed slot. I.e. the slot_diff > 1
             self.recent_hashes.push(SlotBlockhash {
                 slot: new_slot,
                 blockhash: blockhash.clone(),
