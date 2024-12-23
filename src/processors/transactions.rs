@@ -19,7 +19,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::UnboundedSender;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
-use futures::TryStreamExt;
+use futures::{stream::{SplitSink, SplitStream}, TryStreamExt};
 use tracing::{info, warn};
 use redis::AsyncCommands;
 use deadpool_redis::Pool;
@@ -61,7 +61,8 @@ use spl_token::SplBalanceUpdate;
 pub struct TransactionProcessor {
     api_key: String,
     url: String,
-    ws: Arc<Mutex<Option<WebSocketStream<MaybeTlsStream<TcpStream>>>>>,
+    ws_write: Arc<Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>>>>,
+    ws_read: Arc<Mutex<Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>>,
     tx: UnboundedSender<MpscMessage>,
     redis_pool: Arc<Pool>
 }
@@ -115,7 +116,8 @@ impl TransactionProcessor {
         Ok(Self {
             api_key: api_key.to_string(),
             url: url.to_string(),
-            ws: Arc::new(Mutex::new(None)),
+            ws_write: Arc::new(Mutex::new(None)),
+            ws_read: Arc::new(Mutex::new(None)),
             tx,
             redis_pool
         })
@@ -156,7 +158,10 @@ impl TransactionProcessor {
         let (ws, _response) = connect_async(ws_url).await?;
         info!("WebSocket connection established!");
 
-        *self.ws.lock().await = Some(ws);
+        let (write, read) = ws.split();
+
+        *self.ws_write.lock().await = Some(write);
+        *self.ws_read.lock().await = Some(read);
 
         Ok(())
     }
@@ -188,7 +193,7 @@ impl TransactionProcessor {
 
         info!("Unlocking WebSocket mutex...");
 
-        let mut ws_guard = self.ws.lock().await;
+        let mut ws_guard = self.ws_write.lock().await;
 
         info!("WebSocket mutex unlocked.");
 
@@ -202,21 +207,27 @@ impl TransactionProcessor {
     }
 
     pub async fn process_messages(&self) -> Result<(), WsError> {
-        let mut ws_guard = self.ws.lock().await;
-        let ws = ws_guard.take().ok_or_else(|| {
-            WsError::Io(io::Error::new(io::ErrorKind::Other, "WebSocket is not connected!"))
+        let mut read_guard = self.ws_read.lock().await;
+        let read = read_guard.take().ok_or_else(|| {
+            WsError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                "Read stream is not connected!",
+            ))
         })?;
 
-        let (write, read) = ws.split();
-
-        let write_arc = Arc::new(Mutex::new(write));
-
-        let write_clone = write_arc.clone();
+        let write_arc = self.ws_write.clone();
         let heartbeat = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                if let Err(err) = write_clone.lock().await.send(WsMessage::Ping(vec![])).await {
-                    eprintln!("Failed to send ping: {:?}", err);
+
+                let mut write_guard = write_arc.lock().await;
+                if let Some(ref mut sink) = *write_guard {
+                    if let Err(err) = sink.send(WsMessage::Ping(vec![])).await {
+                        eprintln!("Failed to send ping: {:?}", err);
+                        break;
+                    }
+                } else {
+                    eprintln!("Write sink is None, stopping heartbeat.");
                     break;
                 }
             }
@@ -228,8 +239,8 @@ impl TransactionProcessor {
         // ! an account that is also updated in the former message, and the former message
         // ! is processed after, then you'd technically have stale data.
         let result = read.try_for_each_concurrent(16, |msg| {
-            let this = self.clone();
-            async move { this.handle_message(msg).await }
+                let this = self.clone();
+                async move { this.handle_message(msg).await }
         }).await;
 
         heartbeat.abort();
