@@ -95,6 +95,7 @@ pub fn initialize_market_handler(
             quote_dust_threshold: data.quote_dust_threshold
         };
 
+        // todo: We can probably just write this directly to the database and then retrieve during market creation, since it's very infrequent.
         tx.send(MpscMessage {
             topic: SERUM_INITIALIZE_MARKET_UPDATE.to_string(),
             payload: message.encode_to_vec()

@@ -85,6 +85,7 @@ pub async fn trade_handler(
         );
     }
 
+    // todo: For now we'll just assume we need a set of tracked tokens, instead of everything.
     let mut conn = redis_pool.get().await.map_err(|e| {
         WsError::Io(io::Error::new(io::ErrorKind::Other, format!("Failed to get Redis connection: {:?}", e)));
     }).expect("Failed to get Redis connection.");
