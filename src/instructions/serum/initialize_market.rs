@@ -1,4 +1,3 @@
-use prost::Message;
 /// # Serum Market ID Creation (Initialize Market)
 /// 
 /// REQUIRES REDIS: FALSE
@@ -10,25 +9,24 @@ use prost::Message;
 /// 
 /// https://github.com/project-serum/serum-dex/blob/master/dex/src/instruction.rs#L341
 
+use gimpey_db_gateway::{generated::serum_market::CreateSerumMarketRequest, SerumMarketClient};
 use solana_transaction_status::{parse_accounts::ParsedAccount, UiPartiallyDecodedInstruction};
 use borsh::{BorshDeserialize, BorshSerialize};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::info;
+use tracing::{info, warn};
 use yansi::Paint;
 
 use crate::{
-    constants::{addresses::{
+    constants::addresses::{
         PUMP_FUN_RAYDIUM_MIGRATION, 
         WSOL_ADDRESS
-    }, zmq::SERUM_INITIALIZE_MARKET_UPDATE}, 
-    messaging::MpscMessage
+    }, 
+    messaging::MpscMessage,
 };
 
 pub mod spl_token {
     tonic::include_proto!("spl_token");
 }
-
-use spl_token::SerumMarketCreation;
 
 #[derive(BorshDeserialize, BorshSerialize, Debug)]
 struct InitializeMarketData {
@@ -49,11 +47,12 @@ impl InitializeMarketData {
 }
 
 
-pub fn initialize_market_handler(
+pub async fn initialize_market_handler(
     instruction: &UiPartiallyDecodedInstruction,
     accounts: &Vec<ParsedAccount>,
-    tx: UnboundedSender<MpscMessage>,
-    _signature: &String
+    _tx: UnboundedSender<MpscMessage>,
+    _signature: &String,
+    serum_market_client: SerumMarketClient
 ) {
     let is_pump_fun = accounts.iter()
         .find(|account| account.pubkey == PUMP_FUN_RAYDIUM_MIGRATION)
@@ -78,8 +77,8 @@ pub fn initialize_market_handler(
         let base = if base_token_address == WSOL_ADDRESS { "WSOL" } else { base_token_address };
         let quote = if quote_token_address == WSOL_ADDRESS { "WSOL" } else { quote_token_address };
 
-        let message = SerumMarketCreation {
-            market_id_address: market_id_address.to_string(),
+        let request = CreateSerumMarketRequest {
+            market_id: market_id_address.to_string(),
             request_queue_address: request_queue_address.to_string(),
             event_queue_address: event_queue_address.to_string(),
             bids_address: bids_address.to_string(),
@@ -95,24 +94,27 @@ pub fn initialize_market_handler(
             quote_dust_threshold: data.quote_dust_threshold
         };
 
-        // todo: We can probably just write this directly to the database and then retrieve during market creation, since it's very infrequent.
-        tx.send(MpscMessage {
-            topic: SERUM_INITIALIZE_MARKET_UPDATE.to_string(),
-            payload: message.encode_to_vec()
-        }).expect("Failed to send MPSC Message.");
-    
-        info!(
-            "Processing {} instruction for {} {}/{} {}", 
-            Paint::magenta("INITIALIZE_MARKET"),
-            Paint::cyan("SERUM_PROGRAM"),
-            Paint::black(base),
-            Paint::black(quote),
-            Paint::red(is_official)
-        );
-        info!(
-            "{} Market ID: {}", 
-            Paint::red(">"), 
-            Paint::black(market_id_address)
-        );
+        let response = serum_market_client
+            .create_serum_market(request)
+            .await
+            .map_err(|_| warn!("Failed to create Serum Market."));
+
+        if let Err(error) = response {
+            warn!("Failed to create Serum Market: {:?}", error);
+        } else {
+            info!(
+                "Processing {} instruction for {} {}/{} {}", 
+                Paint::magenta("INITIALIZE_MARKET"),
+                Paint::cyan("SERUM_PROGRAM"),
+                Paint::black(base),
+                Paint::black(quote),
+                Paint::red(is_official)
+            );
+            info!(
+                "{} Market ID: {}", 
+                Paint::red(">"), 
+                Paint::black(market_id_address)
+            );
+        }
     }
 }

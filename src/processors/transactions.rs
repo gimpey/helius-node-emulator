@@ -13,6 +13,7 @@ use tokio_tungstenite::{
     tungstenite::{Error as WsError, Message as WsMessage}
 };
 use solana_transaction_status::option_serializer::OptionSerializer;
+use gimpey_db_gateway::SerumMarketClient;
 use std::{collections::HashSet, fs::{self, File}, io};
 use tokio::{net::TcpStream, sync::Mutex};
 use futures_util::{SinkExt, StreamExt};
@@ -64,7 +65,8 @@ pub struct TransactionProcessor {
     ws_write: Arc<Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>>>>,
     ws_read: Arc<Mutex<Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>>>,
     tx: UnboundedSender<MpscMessage>,
-    redis_pool: Arc<Pool>
+    redis_pool: Arc<Pool>,
+    serum_market_client: SerumMarketClient
 }
 
 /// https://github.com/helius-labs/helius-rust-sdk/blob/dev/src/types/enhanced_websocket.rs#L96
@@ -112,14 +114,21 @@ pub struct SubscriptionErrorNotification {
 }
 
 impl TransactionProcessor {
-    pub async fn new(api_key: &str, url: &str, tx: UnboundedSender<MpscMessage>, redis_pool: Arc<Pool>) -> Result<Self, WsError> {
+    pub async fn new(
+        api_key: &str, 
+        url: &str, 
+        tx: UnboundedSender<MpscMessage>, 
+        redis_pool: Arc<Pool>,
+        serum_market_client: SerumMarketClient
+    ) -> Result<Self, WsError> {
         Ok(Self {
             api_key: api_key.to_string(),
             url: url.to_string(),
             ws_write: Arc::new(Mutex::new(None)),
             ws_read: Arc::new(Mutex::new(None)),
             tx,
-            redis_pool
+            redis_pool,
+            serum_market_client
         })
     }
 
@@ -419,8 +428,9 @@ impl TransactionProcessor {
                                             &ui_instruction, 
                                             accounts, 
                                             self.tx.clone(),
-                                            &notification.params.result.signature
-                                        ),
+                                            &notification.params.result.signature,
+                                            self.serum_market_client.clone()
+                                        ).await,
                                     }
                                 }
                             },

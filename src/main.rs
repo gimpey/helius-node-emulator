@@ -1,4 +1,5 @@
 use deadpool_redis::{Config, Runtime};
+use gimpey_db_gateway::SerumMarketClient;
 use processors::blockhashes::BlockhashProcessor;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tracing_subscriber::EnvFilter;
@@ -36,6 +37,13 @@ async fn main() -> Result<(), WsError> {
     let pool = cfg.create_pool(Some(Runtime::Tokio1)).expect("Failed to create pool");
     let pool = Arc::new(pool);
 
+    let db_gateway_api_key = env::var("DB_GATEWAY_API_KEY").expect("DB_GATEWAY_API_KEY must be set");
+    let serum_market_client = SerumMarketClient::connect(
+        "ny.db-gateway.gimpey.com",
+        db_gateway_api_key.to_string(),
+        true
+    ).await.expect("Failed to conect to Serum Market Client.");
+
     // This task is responsible for receiving messages from each of the individual processors and
     // handling them in their respective manners. For now, each is simply sent across a ZMQ socket
     // to downstream programs - however, another application would be to store these messages in a
@@ -61,7 +69,8 @@ async fn main() -> Result<(), WsError> {
         &api_key, 
         "atlas-mainnet.helius-rpc.com",
         tx, 
-        pool
+        pool,
+        serum_market_client.clone()
     ).await?;
 
     let blockhash_processor_task = tokio::spawn(async move {
