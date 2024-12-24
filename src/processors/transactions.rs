@@ -247,7 +247,7 @@ impl TransactionProcessor {
         // ! is processed first compared to an earlier message. If the later message contains
         // ! an account that is also updated in the former message, and the former message
         // ! is processed after, then you'd technically have stale data.
-        let result = read.try_for_each_concurrent(16, |msg| {
+        let result = read.try_for_each(|msg| {
                 let this = self.clone();
                 async move { this.handle_message(msg).await }
         }).await;
