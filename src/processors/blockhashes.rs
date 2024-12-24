@@ -75,7 +75,7 @@ pub static PROXY_URLS: Lazy<Vec<String>> = Lazy::new(|| {
     config.proxies
 });
 
-const DESIRED_EXPIRATIONS: [f64; 5] = [5.0, 15.0, 30.0, 45.0, 60.0];
+const DESIRED_EXPIRATIONS: [u8; 5] = [5, 15, 30, 45, 60];
 
 impl BlockhashProcessor {
     pub async fn new(redis_pool: Arc<Pool>) -> Result<Self, Error> {
@@ -227,7 +227,7 @@ impl BlockhashProcessor {
         }
 
         for t in &DESIRED_EXPIRATIONS {
-            if let Some(candidate) = self.find_blockhash_closest_to_expiry(current_slot, *t) {
+            if let Some(candidate) = self.find_blockhash_closest_to_expiry(current_slot, *t as f64) {
                 let key = format!("recent_blockhash_with_expiration:{}", t);
                 conn.set::<String, String, ()>(key, candidate).await?;
             }

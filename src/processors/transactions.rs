@@ -242,11 +242,12 @@ impl TransactionProcessor {
             }
         });
 
-        // todo: see below
-        // ! It's possible that this could lead to issues in the event that a later message
-        // ! is processed first compared to an earlier message. If the later message contains
-        // ! an account that is also updated in the former message, and the former message
-        // ! is processed after, then you'd technically have stale data.
+        // We could use `try_for_each_concurrent` here to process multiple messages concurrently.
+        // However, this leads to issues considering Solana transactions are ordered. If a later
+        // transaction is processed before an earlier one (block ordering) due to concurrency,
+        // we may feed faulty data to the database. Therefore, we must process messages sequentially.
+        // We could try implement some timestamp logic to determine the most recent transaction prior
+        // to any asynchronous processing, but this is a bit more complex.
         let result = read.try_for_each(|msg| {
                 let this = self.clone();
                 async move { this.handle_message(msg).await }
