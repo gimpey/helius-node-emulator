@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 /// # Serum Market ID Creation (Initialize Market)
 /// 
 /// REQUIRES REDIS: FALSE
@@ -54,6 +56,8 @@ pub async fn initialize_market_handler(
     _signature: &String,
     serum_market_client: SerumMarketClient
 ) {
+    let start = Instant::now();
+
     let is_pump_fun = accounts.iter()
         .find(|account| account.pubkey == PUMP_FUN_RAYDIUM_MIGRATION)
         .map(|account| account.signer)
@@ -115,6 +119,11 @@ pub async fn initialize_market_handler(
                 Paint::red(">"), 
                 Paint::black(market_id_address)
             );
+            info!(
+                "{} Time taken: {}ms",
+                Paint::red(">"),
+                Paint::black(start.elapsed().as_millis())
+            )
         }
     }
 }
